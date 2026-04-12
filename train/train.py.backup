@@ -1,0 +1,70 @@
+# from dataclasses import dataclass
+
+# import torch
+# import torch.nn as nn
+# import torch.optim as optim
+# from safetensors.torch import save_file
+# from torch.nn.functional import pad
+# from torch.nn.utils.rnn import pad_sequence
+# from torch.utils.data import DataLoader
+
+# from .dataset import (  # type: ignore
+#     Tokenizer,
+# )
+# from model import RNN, Config
+
+
+# @dataclass
+# class TrainingConfig:
+#     epochs: int = 10
+#     learning_rate: float = 0.001
+
+
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# cfg = Config()
+# train_cfg = TrainingConfig()
+
+# model = RNN(cfg).to(device)
+
+
+# optimizer = optim.Adam(model.parameters(), lr=train_cfg.learning_rate)
+
+# loss_fn = nn.CrossEntropyLoss()
+
+# targets = torch.tensor([0, 1], dtype=torch.long).to(device)
+
+# epochs = 10
+# CSV_PATH = "/home/henry/Projects/attention-mech/sentiment_analysis_dataset/dataset_komentar_instagram_cyberbullying.csv"
+# tokenizer = Tokenizer()
+
+
+# def pad_seq(x):
+#     t = torch.tensor(x, dtype=torch.long)
+#     if len(t) < cfg.max_seq_len:
+#         return pad(t, (0, cfg.max_seq_len - len(t)))
+#     return t[: cfg.max_seq_len]
+
+
+# transform = pad_seq
+# dataset = SentimentAnalysisPilkadaDataset(
+#     csv_path=CSV_PATH, tokenizer=tokenizer, transform=transform
+# )
+# dataloader = DataLoader(dataset, batch_size=cfg.batch_size, shuffle=True)
+
+# for epoch in range(epochs):
+#     for idx, (x, y) in enumerate(dataloader):
+#         x, y = x.to(device), y.to(device).long()
+
+#         optimizer.zero_grad()
+
+#         output = model(x)
+#         # print(output.shape)
+#         loss = loss_fn(output, y)
+#         loss.backward()
+#         optimizer.step()
+
+#     print(f"Epoch {epoch}| Loss: {loss.item()}")
+
+
+# # when finish create .safetensors
+# save_file(model.state_dict(), "checkpoint1.safetensors")
