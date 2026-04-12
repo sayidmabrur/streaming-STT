@@ -39,16 +39,13 @@ def greedy_decode(logits, tokenizer):
     preds = torch.argmax(logits, dim=-1)
     decoded = []
     for i in range(preds.shape[0]):
-        # Convert tensor to python list for faster and safer element-wise access
         pred = preds[i].tolist()
         pred_seq = []
         for j in range(len(pred)):
-            # 0 is the CTC Blank token
             if pred[j] != 0 and (j == 0 or pred[j] != pred[j - 1]):
                 pred_seq.append(pred[j])
 
         text = tokenizer.decode(pred_seq)
-        # Prevent completely empty strings from rendering blank in the console
         decoded.append(text if text.strip() else "<empty>")
     return decoded
 
@@ -56,7 +53,6 @@ def greedy_decode(logits, tokenizer):
 def target_decode(targets, tokenizer):
     decoded = []
     for i in range(targets.shape[0]):
-        # Strip out padding/blanks (0) from targets
         tgt_seq = [t.item() for t in targets[i] if t.item() != 0]
         decoded.append(tokenizer.decode(tgt_seq))
     return decoded
@@ -105,7 +101,6 @@ for epoch in range(epochs):
 
         pbar.set_postfix(loss=f"{loss.item():.4f}")
 
-    # Evaluate WER on the last batch of the epoch
     model.eval()
     with torch.no_grad():
         output = model(x)
@@ -121,5 +116,4 @@ for epoch in range(epochs):
         print(f"  Pred:   {pred_texts[0]}")
     print("=============================\n")
 
-# when finish create .safetensors
 save_file(model.state_dict(), "checkpoint1.safetensors")
