@@ -32,13 +32,9 @@ class RNNEncoder(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
 
-        # In ASR, input is a spectrogram (continuous float values), not text tokens!
-        # So we use a Linear layer to project mel bins to embedding_dim
-        # Assuming the standard n_mels=128 from your feature extractor
         self.input_proj = nn.Linear(128, config.embedding_dim)
 
-        # Using a Bidirectional LSTM instead of the custom Vanilla RNN
-        self.backbone = nn.LSTM(
+        self.encoder = nn.LSTM(
             input_size=config.embedding_dim,
             hidden_size=config.hidden_size,
             num_layers=config.num_layers,
@@ -50,7 +46,7 @@ class RNNEncoder(nn.Module):
     def forward(self, x):
         x = self.input_proj(x)
         # LSTM returns (output, (h_n, c_n)), we only need the output sequence
-        x, _ = self.backbone(x)
+        x, _ = self.encoder(x)
         return x
 
 
