@@ -26,7 +26,7 @@ def greedy_decode(logits, tokenizer):
                 pred_seq.append(pred[j])
 
         text = tokenizer.decode(pred_seq)
-        decoded.append(text if text.strip() else "<empty>")
+        decoded.append(text)
     return decoded
 
 

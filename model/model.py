@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 
 import torch
@@ -17,50 +18,51 @@ class Config:
 config = Config()
 
 
-class OutputLayer(nn.Module):
-    def __init__(self, config: Config):
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=5000):
         super().__init__()
-        # Since we are using a Bidirectional LSTM, the output feature dimension is hidden_size * 2
-        self.out = nn.Linear(config.hidden_size * 2, config.vocab_size)
-
-    def forward(self, x):
-        x = self.out(x)
-        return x
-
-
-class RNNEncoder(nn.Module):
-    def __init__(self, config: Config):
-        super().__init__()
-
-        self.input_proj = nn.Linear(128, config.embedding_dim)
-
-        self.encoder = nn.LSTM(
-            input_size=config.embedding_dim,
-            hidden_size=config.hidden_size,
-            num_layers=config.num_layers,
-            batch_first=True,
-            bidirectional=True,
-            dropout=0.1 if config.num_layers > 1 else 0.0,
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)
         )
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        self.register_buffer("pe", pe)
 
     def forward(self, x):
-        x = self.input_proj(x)
-        # LSTM returns (output, (h_n, c_n)), we only need the output sequence
-        x, _ = self.encoder(x)
+        # x shape: [batch_size, seq_len, d_model]
+        x = x + self.pe[:, : x.size(1), :]
         return x
 
 
 class ASRModel(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
+        self.d_model = config.embedding_dim
 
-        self.encoder = RNNEncoder(config)
-        self.output = OutputLayer(config)
+        self.src_proj = nn.Linear(128, self.d_model)
+
+        self.pos_encoder = PositionalEncoding(self.d_model, max_len=config.max_seq_len)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=self.d_model,
+            nhead=8,
+            batch_first=True,
+        )
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=config.num_layers,
+        )
+
+        self.output_proj = nn.Linear(self.d_model, config.vocab_size)
 
     def forward(self, x):
         # Transpose from (batch, n_mels, time) to (batch, time, n_mels)
         x = x.transpose(1, 2)
-        x = self.encoder(x)
-        x = self.output(x)
-
-        return x
+        x = self.src_proj(x)
+        x = self.pos_encoder(x)
+        x = self.transformer(x)
+        output = self.output_proj(x)
+        return output

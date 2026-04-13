@@ -5,7 +5,7 @@ from model import Config as ModelConfig
 
 @dataclass
 class TrainingConfig:
-    epochs: int = 3
+    epochs: int = 5
     learning_rate: float = 1e-5
     tsv_path: str = "/home/henry/Projects/ASR/dataset/en/train.tsv"
     tokenizer_prefix: str = "commonvoice_v25_sp"
