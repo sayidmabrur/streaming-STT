@@ -91,6 +91,21 @@ dataloader = DataLoader(
     pin_memory=True,
 )
 
+test_dataset = CommonVoiceDataset(
+    tsv_path=train_cfg.test_tsv_path,
+    audio_dir_path=train_cfg.audio_dir_path,
+    transform=FeatureExtractor(),
+)
+
+test_dataloader = DataLoader(
+    test_dataset,
+    batch_size=model_cfg.batch_size,
+    shuffle=False,
+    collate_fn=collate_fn,
+    num_workers=4,
+    pin_memory=True,
+)
+
 for epoch in range(epochs):
     pbar = tqdm(dataloader, desc=f"Epoch {epoch}")
     for idx, (x, y, input_lengths, target_lengths) in enumerate(pbar):
@@ -113,15 +128,22 @@ for epoch in range(epochs):
     #
     save_file(model.state_dict(), f"checkpoint_{epoch}.safetensors")
     model.eval()
-    with torch.no_grad():
-        output = model(x)
-        pred_texts = greedy_decode(output, tokenizer)
+    wers = []
+    pred_texts, target_texts = [], []
+    test_pbar = tqdm(test_dataloader, desc="Testing")
+    for idx, (x, y, input_lengths, target_lengths) in enumerate(test_pbar):
+        x, y = x.to(device), y.to(device).long()
+        with torch.no_grad():
+            output = model(x)
+            pred_texts = greedy_decode(output, tokenizer)
         target_texts = target_decode(y, tokenizer)
         wer = compute_wer(pred_texts, target_texts)
+        wers.append(wer)
+    avg_wer = sum(wers) / len(wers) if len(wers) > 0 else np.nan
     model.train()
 
     print(f"\n=== Epoch {epoch} Summary ===")
-    print(f"Loss: {loss.item():.4f} | WER: {wer:.4f}")
+    print(f"Loss: {loss.item():.4f} | Avg, WER: {avg_wer:.4f}")
     if len(pred_texts) > 0:
         print(f"  Target: {target_texts[0]}")
         print(f"  Pred:   {pred_texts[0]}")
