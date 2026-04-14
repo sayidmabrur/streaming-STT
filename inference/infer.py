@@ -39,7 +39,7 @@ def main():
     model = ASRModel(config).to(device)
 
     # 2. Load the trained weights
-    checkpoint_path = "checkpoint1.safetensors"
+    checkpoint_path = "checkpoint_0.safetensors"
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint not found at {checkpoint_path}")
 

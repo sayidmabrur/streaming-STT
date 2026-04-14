@@ -1,13 +1,17 @@
+import os
 from dataclasses import dataclass
+
+# Define the project root automatically assuming config.py is in ASR/train/
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 @dataclass
 class TrainingConfig:
     epochs: int = 12
     learning_rate: float = 1e-6
-    tsv_path: str = "/home/capon/projects/epic-projects/streaming-STT/dataset/cv-corpus-25.0-2026-03-09/en/train.tsv"
-    test_tsv_path: str = "/home/capon/projects/epic-projects/streaming-STT/dataset/cv-corpus-25.0-2026-03-09/en/test.tsv"
-    audio_dir_path: str = "/home/capon/projects/epic-projects/streaming-STT/dataset/cv-corpus-25.0-2026-03-09/en/clips"
+    tsv_path: str = os.path.join(PROJECT_ROOT, "dataset/en/train.tsv")
+    test_tsv_path: str = os.path.join(PROJECT_ROOT, "dataset/en/test.tsv")
+    audio_dir_path: str = os.path.join(PROJECT_ROOT, "dataset/en/clips")
     tokenizer_prefix: str = "commonvoiceBPE"
     vocab_size: int = 3000
     seed: int = 42
