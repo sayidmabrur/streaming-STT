@@ -6,9 +6,9 @@ import sentencepiece as spm
 class Tokenizer:
     def __init__(
         self,
-        tsv_path="/home/henry/Projects/ASR/dataset/en/train.tsv",
+        tsv_path="/home/capon/projects/epic-projects/ASR/dataset/en/train.tsv",
         vocab_size=1000,
-        model_prefix="commonvoice_v25_sp",
+        model_prefix="tokenizer",
     ):
         self.tsv_path = tsv_path
         self.vocab_size = vocab_size

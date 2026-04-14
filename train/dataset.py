@@ -10,6 +10,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
 
 from model.tokenizer import Tokenizer
+from train.config import train_cfg
 
 
 class CommonVoiceDataset(Dataset):
@@ -17,7 +18,9 @@ class CommonVoiceDataset(Dataset):
         self, tsv_path, audio_dir_path=None, transform=None, target_transform=None
     ):
         if audio_dir_path is None:
-            self.audio_dir_path = "/home/henry/Projects/ASR/dataset/en/clips/"
+            self.audio_dir_path = (
+                "/home/capon/projects/epic-projects/ASR/dataset/en/clips/"
+            )
         else:
             self.audio_dir_path = audio_dir_path
 
@@ -26,7 +29,9 @@ class CommonVoiceDataset(Dataset):
         self.target_transform = target_transform
 
         # Load our new SentencePiece Tokenizer
-        self.tokenizer = Tokenizer(tsv_path=self.tsv_path)
+        self.tokenizer = Tokenizer(
+            tsv_path=self.tsv_path, model_prefix=train_cfg.tokenizer_prefix
+        )
 
         self.df = pd.read_csv(tsv_path, sep="\t", low_memory=False)
         self.df = self.df.dropna(subset=["path", "sentence"]).reset_index(drop=True)
@@ -115,16 +120,3 @@ def collate_fn(batch):
         torch.tensor(input_lengths, dtype=torch.long),
         torch.tensor(target_lengths, dtype=torch.long),
     )
-
-
-if __name__ == "__main__":
-    TSV_PATH = "/home/henry/Projects/ASR/dataset/en/train.tsv"
-
-    # Initialize dataset with the new feature extractor
-    dataset = CommonVoiceDataset(tsv_path=TSV_PATH, transform=FeatureExtractor())
-
-    if len(dataset) > 0:
-        for i in range(5):
-            mel_spectrogram, transcript_tokens = dataset[i]
-            print(f"Transcript tokens: {transcript_tokens}")
-            print(f"MelSpectrogram shape: {mel_spectrogram.shape}")

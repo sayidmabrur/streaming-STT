@@ -4,7 +4,7 @@ import pandas as pd
 import sentencepiece as spm
 
 
-def train_tokenizer(tsv_path, model_prefix="commonvoice_v25_sp", vocab_size=1000):
+def train_tokenizer(tsv_path, model_prefix="commonvoice_v25_BPE", vocab_size=1000):
     print(f"Training SentencePiece model with vocab size {vocab_size}...")
 
     # Read the TSV and extract the text data
@@ -28,7 +28,7 @@ def train_tokenizer(tsv_path, model_prefix="commonvoice_v25_sp", vocab_size=1000
         input=temp_txt,
         model_prefix=model_prefix,
         vocab_size=vocab_size,
-        model_type="unigram",
+        model_type="bpe",
         pad_id=0,  # Used as CTC Blank <pad>
         unk_id=1,  # <unk> token
         bos_id=-1,  # No beginning of sentence token
@@ -54,7 +54,11 @@ if __name__ == "__main__":
     )
 
     # Quick test to verify it works
-    tokenizer = Tokenizer(tsv_path=train_cfg.tsv_path, vocab_size=train_cfg.vocab_size)
+    tokenizer = Tokenizer(
+        tsv_path=train_cfg.tsv_path,
+        vocab_size=train_cfg.vocab_size,
+        model_prefix=train_cfg.tokenizer_prefix,
+    )
     sample_text = "hello world this is a test"
     encoded = tokenizer.encode(sample_text)
     decoded = tokenizer.decode(encoded)

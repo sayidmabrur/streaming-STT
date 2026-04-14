@@ -30,8 +30,16 @@ model = ASRModel(model_cfg).to(device)
 optimizer = optim.Adam(model.parameters(), lr=train_cfg.learning_rate)
 loss_fn = nn.CTCLoss(blank=0, zero_infinity=True)
 
-dataset = CommonVoiceDataset(tsv_path=train_cfg.tsv_path, transform=FeatureExtractor())
-tokenizer = Tokenizer(tsv_path=train_cfg.tsv_path, vocab_size=train_cfg.vocab_size)
+dataset = CommonVoiceDataset(
+    tsv_path=train_cfg.tsv_path,
+    audio_dir_path=train_cfg.audio_dir_path,
+    transform=FeatureExtractor(),
+)
+tokenizer = Tokenizer(
+    tsv_path=train_cfg.tsv_path,
+    vocab_size=train_cfg.vocab_size,
+    model_prefix=train_cfg.tokenizer_prefix,
+)
 
 
 def greedy_decode(logits, tokenizer):
@@ -101,6 +109,9 @@ for epoch in range(epochs):
 
         pbar.set_postfix(loss=f"{loss.item():.4f}")
 
+    # save the model epoch checkpoint
+    #
+    save_file(model.state_dict(), f"checkpoint_{epoch}.safetensors")
     model.eval()
     with torch.no_grad():
         output = model(x)
@@ -115,5 +126,3 @@ for epoch in range(epochs):
         print(f"  Target: {target_texts[0]}")
         print(f"  Pred:   {pred_texts[0]}")
     print("=============================\n")
-
-save_file(model.state_dict(), "checkpoint1.safetensors")

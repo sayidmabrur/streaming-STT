@@ -34,7 +34,7 @@
 # targets = torch.tensor([0, 1], dtype=torch.long).to(device)
 
 # epochs = 10
-# CSV_PATH = "/home/henry/Projects/attention-mech/sentiment_analysis_dataset/dataset_komentar_instagram_cyberbullying.csv"
+# CSV_PATH = "/home/capon/projects/epic-projects/attention-mech/sentiment_analysis_dataset/dataset_komentar_instagram_cyberbullying.csv"
 # tokenizer = Tokenizer()
 
 
