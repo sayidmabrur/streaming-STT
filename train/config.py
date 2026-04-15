@@ -13,13 +13,13 @@ class TrainingConfig:
     test_tsv_path: str = os.path.join(PROJECT_ROOT, "dataset/en/test.tsv")
     audio_dir_path: str = os.path.join(PROJECT_ROOT, "dataset/en/clips")
     tokenizer_prefix: str = "commonvoiceBPE"
-    vocab_size: int = 3000
+    vocab_size: int = 1000
     seed: int = 42
 
 
 @dataclass
 class Config:
-    vocab_size: int = 3000
+    vocab_size: int = 1000
     # hidden_size: int = 300
     embedding_dim: int = 768
     num_layers: int = 8

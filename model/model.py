@@ -26,56 +26,24 @@ class PositionalEncoding(nn.Module):
         return x
 
 
-# implementation of RoPE a copy-pasta from : https://medium.com/ai-insights-cobet/rotary-positional-embeddings-a-detailed-look-and-comprehensive-understanding-4ff66a874d83
 class RotaryPositionalEmbedding(nn.Module):
     def __init__(self, d_model, max_seq_len):
         super(RotaryPositionalEmbedding, self).__init__()
-
-        # Create a rotation matrix.
-        self.rotation_matrix = torch.zeros(
-            d_model, d_model, device=torch.device("cuda")
-        )
-
-        i = torch.arange(0, d_model, dtype=torch.float32).unsqueeze(1)
-        j = torch.arange(0, d_model, dtype=torch.float32).unsqueeze(0)
-
-        angles = i * j * 0.01
-        self.rotation_matrix = torch.cos(angles)
-        # for i in range(d_model):
-        #     for j in range(d_model):
-        #         self.rotation_matrix[i, j] = torch.cos(i * j * 0.01)
-
-        # Create a positional embedding matrix.
-        self.positional_embedding = torch.zeros(
-            max_seq_len, d_model, device=torch.device("cuda")
-        )
-        i = torch.arange(0, max_seq_len, dtype=torch.float32).unsqueeze(1)
-        j = torch.arange(0, d_model, dtype=torch.float32).unsqueeze(0)
-
-        self.positional_embedding = torch.cos(i * j * 0.01)
-        # print(self.positional_embedding.shape)
-        # for i in range(max_seq_len):
-        #     for j in range(d_model):
-        #         self.positional_embedding[i, j] = torch.cos(i * j * 0.01)
+        inv_freq = 1.0 / (10000 ** (torch.arange(0, d_model, 2).float() / d_model))
+        self.register_buffer("inv_freq", inv_freq)
 
     def forward(self, x):
-        """
-        Args:
-            x: A tensor of shape (batch_size, seq_len, d_model).
+        seq_len = x.size(1)
+        t = torch.arange(seq_len, device=x.device).type_as(self.inv_freq)
+        freqs = torch.outer(t, self.inv_freq)
+        emb = torch.cat((freqs, freqs), dim=-1)
+        cos = emb.cos().unsqueeze(0)
+        sin = emb.sin().unsqueeze(0)
 
-        Returns:
-            A tensor of shape (batch_size, seq_len, d_model).
-        """
-
-        # Add the positional embedding to the input tensor.
-        # We slice the positional embedding to match the sequence length of x,
-        # just like the original PositionalEncoding did with x.size(1)
-        x = x + self.positional_embedding[: x.size(1), :].to(x.device)
-
-        # Apply the rotation matrix to the input tensor.
-        x = torch.matmul(x, self.rotation_matrix.to(x.device))
-
-        return x
+        x1 = x[..., : x.shape[-1] // 2]
+        x2 = x[..., x.shape[-1] // 2 :]
+        x_rot = torch.cat((-x2, x1), dim=-1)
+        return (x * cos) + (x_rot * sin)
 
 
 class ASRModel(nn.Module):
