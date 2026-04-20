@@ -1,1 +1,6 @@
-{ "reportUntypedBaseClass": "none", "reportUnknownMemberType": "none", "reportMissingImports": "none", "reportMissingParameterType": "none" }
+{
+  "reportUntypedBaseClass": "none",
+  "reportUnknownMemberType": "none",
+  "reportMissingImports": "none",
+  "reportMissingParameterType": "none",
+}

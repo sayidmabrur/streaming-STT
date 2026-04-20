@@ -3,3 +3,9 @@ dataset/*
 */__pycache__/*
 .ipynb_checkpoints/*
 .virtual_documents/*
+wandb/*
+*.log
+.zed/*
+*.model
+*.vocab
+*.safetensors

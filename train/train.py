@@ -10,7 +10,8 @@ from safetensors.torch import save_file
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from model import ASRModel
+import wandb
+from model import Config, QuasTransformer
 from model.tokenizer import Tokenizer
 
 from .config import model_cfg, train_cfg
@@ -26,7 +27,7 @@ if torch.cuda.is_available():
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 epochs = train_cfg.epochs
 
-model = ASRModel(model_cfg).to(device)
+model = QuasTransformer(model_cfg).to(device)
 optimizer = optim.Adam(model.parameters(), lr=train_cfg.learning_rate)
 loss_fn = nn.CTCLoss(blank=0, zero_infinity=True)
 
@@ -106,7 +107,35 @@ test_dataloader = DataLoader(
     pin_memory=True,
 )
 
+# Run in offline mode to avoid connection drops during training.
+# After training finishes, sync to W&B with:
+#   wandb sync wandb/latest-run
+
+if train_cfg.wandb_log:
+    wandb.setup(settings=wandb.Settings(mode="offline"))
+    run = wandb.init(
+        # Set the wandb entity where your project will be logged (generally your team name).
+        entity="sayid-10121012-universitas-komputer-indonesia",
+        # Set the wandb project where this run will be logged.
+        project="QuasASR",
+        # Track hyperparameters and run metadata.
+        config={
+            "learning_rate": train_cfg.learning_rate,
+            "architecture": "Transformer_Encoder",
+            "dataset": "CommonVoice-v2.5",
+            "epochs": train_cfg.epochs,
+        },
+    )
+else:
+    glob_log = []
+
+    def run(log: list, step: int):
+        glob_log.append({"step": step, "log": log})
+
+
+step = 1
 for epoch in range(epochs):
+    avg_wer = 0
     pbar = tqdm(dataloader, desc=f"Epoch {epoch}")
     for idx, (x, y, input_lengths, target_lengths) in enumerate(pbar):
         x, y = x.to(device), y.to(device).long()
@@ -114,37 +143,38 @@ for epoch in range(epochs):
 
         output = model(x)
         output_log_softmax = nn.functional.log_softmax(output, dim=-1)
-        output_log_softmax = output_log_softmax.transpose(
-            0, 1
-        )  # (time, batch, vocab_size)
+        output_log_softmax = output_log_softmax.transpose(0, 1)
 
         loss = loss_fn(output_log_softmax, y, input_lengths, target_lengths)
+
         loss.backward()
         optimizer.step()
 
+        if step % 1000 == 0:
+            model.eval()
+            wers = []
+            pred_texts, target_texts = [], []
+            test_pbar = tqdm(test_dataloader, desc="Testing")
+            for idx, (x, y, input_lengths, target_lengths) in enumerate(test_pbar):
+                x, y = x.to(device), y.to(device).long()
+                with torch.no_grad():
+                    output = model(x)
+                    pred_texts = greedy_decode(output, tokenizer)
+                target_texts = target_decode(y, tokenizer)
+                wer = compute_wer(pred_texts, target_texts)
+                wers.append(wer)
+            avg_wer = sum(wers) / len(wers) if len(wers) > 0 else np.nan
+            model.train()
+            run.log({"wer": avg_wer}, step=step)
+        run.log({"loss": loss.item()}, step=step)
         pbar.set_postfix(loss=f"{loss.item():.4f}")
+        step += 1
 
-    # save the model epoch checkpoint
-    #
     save_file(model.state_dict(), f"checkpoint_{epoch}.safetensors")
-    model.eval()
-    wers = []
-    pred_texts, target_texts = [], []
-    test_pbar = tqdm(test_dataloader, desc="Testing")
-    for idx, (x, y, input_lengths, target_lengths) in enumerate(test_pbar):
-        x, y = x.to(device), y.to(device).long()
-        with torch.no_grad():
-            output = model(x)
-            pred_texts = greedy_decode(output, tokenizer)
-        target_texts = target_decode(y, tokenizer)
-        wer = compute_wer(pred_texts, target_texts)
-        wers.append(wer)
-    avg_wer = sum(wers) / len(wers) if len(wers) > 0 else np.nan
-    model.train()
 
     print(f"\n=== Epoch {epoch} Summary ===")
     print(f"Loss: {loss.item():.4f} | Avg, WER: {avg_wer:.4f}")
-    if len(pred_texts) > 0:
-        print(f"  Target: {target_texts[0]}")
-        print(f"  Pred:   {pred_texts[0]}")
     print("=============================\n")
+
+
+run.finish()

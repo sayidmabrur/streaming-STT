@@ -1,1 +1,1 @@
-from .model import ASRModel, Config
+from .model import Config, QuasTransformer

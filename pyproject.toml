@@ -1,0 +1,4 @@
+[tool.basedpyright]
+typeCheckingMode = "standard" # Options: "off", "basic", "standard", "strict", "all"
+reportMissingImports = "none" # Disables warnings for missing imports
+reportUnusedVariable = "warning" # Changes error to warning

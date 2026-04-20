@@ -9,7 +9,7 @@ from safetensors.torch import load_file
 # Add the parent directory to the path so we can import from model and train
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from model.model import ASRModel, Config
+from model.model import Config, QuasTransformer
 from model.tokenizer import Tokenizer
 from train.dataset import FeatureExtractor
 
@@ -36,7 +36,7 @@ def main():
 
     # 1. Load Model Config and Architecture
     config = Config()
-    model = ASRModel(config).to(device)
+    model = QuasTransformer(config).to(device)
 
     # 2. Load the trained weights
     checkpoint_path = "checkpoint_0.safetensors"
