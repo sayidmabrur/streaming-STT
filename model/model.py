@@ -47,40 +47,41 @@ class RotaryPositionalEmbedding(nn.Module):
         return (x * cos) + (x_rot * sin)
 
 
-# class MultiHeadAttention(nn.Module):
-#     def __init__(self, d_model, num_heads):
-#         super(MultiHeadAttention, self).__init__()
-#         self.num_heads = num_heads
-#         self.head_dim = d_model // num_heads
-
-#     def forward(self, x):
-#         pass
-
 class ScaledDotProductAttention(nn.Module):
-    def __init__(self, d_model, num_heads):
+    def __init__(self, d_model, num_heads, dropout, n_mels):
         super(ScaledDotProductAttention, self).__init__()
         # self.num_heads = num_heads
         # self.head_dim = d_model // num_heads
 
-        self.w_q = nn.Parameter(torch.randn(d_model, d_model))
-        self.w_k = nn.Parameter(torch.randn(d_model, d_model))
-        self.w_v = nn.Parameter(torch.randn(d_model, d_model))
-        self.out_proj = nn.Parameter(torch.randn(d_model, d_model))
-
+        self.d_model = d_model
+        self.dropout = nn.Dropout(dropout)
+        self.w_q = nn.Linear(d_model, d_model, bias=False)
+        self.w_k = nn.Linear(d_model, d_model, bias=False)
+        self.w_v = nn.Linear(d_model, d_model, bias=False)
+        self.out_proj = nn.Linear(d_model, d_model, bias=False)
+        # self.w_q = nn.Parameter(torch.randn(d_model, d_model))
+        # self.w_k = nn.Parameter(torch.randn(d_model, d_model))
+        # self.w_v = nn.Parameter(torch.randn(d_model, d_model))
+        # self.out_proj = nn.Parameter(torch.randn(d_model, d_model))
 
     def forward(self, x):
 
-        Q = x @ self.w_q
-        K = x @ self.w_k
-        V = x @ self.w_v
-
-        attn_score=(Q @ K.T) / torch.sqrt(Q.shape[-1])
+        # B, T, C = x.shape
+        Q = self.w_q(x)
+        K = self.w_k(x)
+        V = self.w_v(x)
+        print("Q:", Q.shape, "K:", K.shape, "V:", V.shape)
+        K_T = K.transpose(-2, -1)
+        q_k = Q @ K_T
+        # print("q_k", q_k.shape)
+        attn_score = q_k / (self.d_model**0.5)
+        print("attn_score:", attn_score.shape)
         attn_score = torch.softmax(attn_score, dim=-1)
-
-        return attn_score
-        # out = attention @ V
-        # out = out @ self.out_proj
-
+        out = attn_score @ V
+        print("out:", out.shape)
+        out = self.out_proj(out)
+        print("out_proj:", out.shape)
+        return out
 
 
 # class EfficientAttention(nn.Module):
@@ -130,15 +131,17 @@ class FeedForward(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, d_model, block_size, num_heads, dropout):
+    def __init__(self, d_model, num_heads, dropout, n_mels):
         super(EncoderLayer, self).__init__()
-
-        self.attention = EfficientAttention(
-            d_model, num_heads, block_size
-        )
+        self.x_proj = nn.Linear(n_mels, d_model, bias=False)
+        self.attention = ScaledDotProductAttention(d_model, num_heads, dropout, n_mels)
+        # self.attention = EfficientAttention(d_model, num_heads, block_size)
         # self.pos_encoder = PositionalEncoding(d_model, block_size)
 
     def forward(self, x):
+        x = self.x_proj(x)
+        x = self.attention(x)
+        # print("attention_score: ", x)
         return x
         # x = self.pos_encoder(x)
 
@@ -156,33 +159,47 @@ class DecoderLayer(nn.Module):
 class QuasTransformer(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
+        # print("config input:", config)
         self.d_model = config.embedding_dim
-
-        self.src_proj = nn.Linear(128, self.d_model)
-
         # self.pos_encoder = RotaryPositionalEmbedding(self.d_model, config.block_size)
         # self.pos_encoder = PositionalEncoding(self.d_model, config.block_size)
-        self.output_proj = nn.Linear(self.d_model, config.vocab_size)
 
         self.transformer_encoder = EncoderLayer(
             self.d_model,
-            config.block_size,
+            # config.block_size,
             num_heads=config.num_heads,
             dropout=config.dropout,
+            n_mels=config.n_mels,
         )
-        self.transformer_decoder = DecoderLayer(
-            self.d_model,
-            config.block_size,
-            num_heads=config.num_heads,
-            dropout=config.dropout,
-        )
+        # self.transformer_decoder = DecoderLayer(
+        #     self.d_model,
+        #     config.block_size,
+        #     num_heads=config.num_heads,
+        #     dropout=config.dropout,
+        # )
 
     def forward(self, x):
+
         # Transpose from (batch, n_mels, time) to (batch, time, n_mels)
         x = x.transpose(1, 2)
-        x = self.src_proj(x)
-        x = self.pos_encoder(x)
         x = self.transformer_encoder(x)
-        x = self.transformer_decoder(x)
-        output = self.output_proj(x)
-        return output
+
+        return x
+        # x = self.src_proj(x)
+        # x = self.pos_encoder(x)
+        # x = self.transformer_encoder(x)
+        # x = self.transformer_decoder(x)
+        # output = self.output_proj(x)
+        # return output
+
+
+from train.config import model_cfg
+
+BLOCK_SIZE = 4096
+EMBEDDING_DIM = model_cfg.embedding_dim
+N_MELS = 128
+
+train_sample = torch.randn(8, N_MELS, BLOCK_SIZE)
+model = QuasTransformer(model_cfg)
+model(train_sample)
+print(model)
