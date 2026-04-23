@@ -47,6 +47,36 @@ class RotaryPositionalEmbedding(nn.Module):
         return (x * cos) + (x_rot * sin)
 
 
+class MultiHeadAttention(nn.Module):
+    def __init__(self, n_mels, d_model, num_heads, dropout=0.01):
+        super(MultiHeadAttention, self).__init__()
+
+        self.input_dim = n_mels
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.head_dim = d_model // num_heads
+        self.w_q = nn.Linear(n_mels, self.head_dim, bias=False)
+        self.w_k = nn.Linear(n_mels, self.head_dim, bias=False)
+        self.w_v = nn.Linear(n_mels, self.head_dim, bias=False)
+        self.out_proj = nn.Linear(self.head_dim * num_heads, d_model, bias=False)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        B, T, _ = x.shape
+
+        Q = self.w_q(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        K = self.w_k(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        V = self.w_v(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+
+        q_k = Q @ K.transpose(-2, -1)
+        attn_score = torch.softmax((q_k / (self.d_model**0.5)), dim=-1)
+        out = attn_score @ V
+        out = out.transpose(1, 2).contiguous().view(B, T, self.d_model)
+        out = self.out_proj(out)
+        # return x
+        return out
+
+
 class ScaledDotProductAttention(nn.Module):
     def __init__(self, d_model, num_heads, dropout, n_mels):
         super(ScaledDotProductAttention, self).__init__()
@@ -70,17 +100,10 @@ class ScaledDotProductAttention(nn.Module):
         Q = self.w_q(x)
         K = self.w_k(x)
         V = self.w_v(x)
-        print("Q:", Q.shape, "K:", K.shape, "V:", V.shape)
-        K_T = K.transpose(-2, -1)
-        q_k = Q @ K_T
-        # print("q_k", q_k.shape)
-        attn_score = q_k / (self.d_model**0.5)
-        print("attn_score:", attn_score.shape)
-        attn_score = torch.softmax(attn_score, dim=-1)
+        q_k = Q @ K.transpose(-2, -1)
+        attn_score = torch.softmax((q_k / (self.d_model**0.5)), dim=-1)
         out = attn_score @ V
-        print("out:", out.shape)
         out = self.out_proj(out)
-        print("out_proj:", out.shape)
         return out
 
 
@@ -133,13 +156,14 @@ class FeedForward(nn.Module):
 class EncoderLayer(nn.Module):
     def __init__(self, d_model, num_heads, dropout, n_mels):
         super(EncoderLayer, self).__init__()
-        self.x_proj = nn.Linear(n_mels, d_model, bias=False)
-        self.attention = ScaledDotProductAttention(d_model, num_heads, dropout, n_mels)
+        # self.x_proj = nn.Linear(n_mels, d_model, bias=False)
+        self.attention = MultiHeadAttention(n_mels, d_model, num_heads, dropout)
+        # self.attention = ScaledDotProductAttention(d_model, num_heads, dropout, n_mels)
         # self.attention = EfficientAttention(d_model, num_heads, block_size)
         # self.pos_encoder = PositionalEncoding(d_model, block_size)
 
     def forward(self, x):
-        x = self.x_proj(x)
+        # x = self.x_proj(x)
         x = self.attention(x)
         # print("attention_score: ", x)
         return x
@@ -201,5 +225,6 @@ N_MELS = 128
 
 train_sample = torch.randn(8, N_MELS, BLOCK_SIZE)
 model = QuasTransformer(model_cfg)
-model(train_sample)
-print(model)
+x = model(train_sample)
+# print(x.shape)
+# print(model)
