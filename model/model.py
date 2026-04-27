@@ -1,5 +1,7 @@
 # type: ignore
 
+import torch.nn.functional as F
+
 import math
 
 import torch
@@ -93,12 +95,13 @@ class ScaledDotProductAttention(nn.Module):
 
     def forward(self, x):
 
-        # B, T, C = x.shape
+        B, T, C = x.shape
+        head_dim = C // self.num_heads
         Q = self.w_q(x)
         K = self.w_k(x)
         V = self.w_v(x)
         q_k = Q @ K.transpose(-2, -1)
-        attn_score = torch.softmax((q_k / (self.d_model**0.5)), dim=-1)
+        attn_score = torch.softmax((q_k / math.sqrt(head_dim)), dim=-1)
         out = attn_score @ V
         out = self.out_proj(out)
         return out
@@ -116,6 +119,25 @@ class FeedForward(nn.Module):
         return x
 
 
+class ResidualAttention(nn.Module):
+    def __init__(self, config):
+        super(ResidualAttention, self).__init__()
+
+        self.attention = MultiHeadAttention(config)
+
+        self.mlp = nn.Sequential(
+            nn.Linear(config.embedding_dim, config.embedding_dim * 4),
+            nn.GELU(),
+            nn.Linear(config.embedding_dim * 4, config.embedding_dim),
+        )
+        self.ln_mlp = nn.LayerNorm(config.embedding_dim)
+
+    def forward(self, x):
+        x = x + self.attention(x)
+        x = x + self.mlp(self.ln_mlp(x))
+        return x
+
+
 class EncoderLayer(nn.Module):
     def __init__(self, config):
         super(EncoderLayer, self).__init__()
@@ -126,21 +148,28 @@ class EncoderLayer(nn.Module):
         self.input_proj2 = nn.Conv1d(config.embedding_dim, config.embedding_dim, kernel_size=3, padding=1)
 
         self.config = config
-        self.relu = nn.ReLU()
 
-        self.attention = MultiHeadAttention(config)
+        # self.attention = MultiHeadAttention(config)
+        self.attention = ResidualAttention(config)
+
+        self.post_ln = nn.LayerNorm(config.embedding_dim)
+
 
     def forward(self, x):
 
         # x = x.transpose(1,2)
+        x = x.permute(0, 2, 1)
         x = self.input_proj(x)
-        x = self.relu(x)
+        x = F.gelu(x)
         x = self.input_proj2(x)
-        x = self.relu(x)
-        # print("input_proj:", x.shape)
-
-        # x = x.transpose(1,2)
+        x = F.gelu(x)
+        x = x.permute(0, 2, 1)
         x = self.attention(x)
+
+
+
+
+        x = self.post_ln(x)
 
         # print(x.shape)
 
