@@ -26,7 +26,7 @@ class Config:
     num_layers: int = 3
     batch_size: int = 16
     block_size: int = 2048
-    num_heads: int = 8
+    num_heads: int = 4
     dropout: float = 0.01
     n_mels: int = 128
 

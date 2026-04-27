@@ -47,41 +47,42 @@ class RotaryPositionalEmbedding(nn.Module):
         return (x * cos) + (x_rot * sin)
 
 
+# class AttentionBlock
+
 class MultiHeadAttention(nn.Module):
-    def __init__(self, n_mels, d_model, num_heads, dropout=0.01):
+    def __init__(self, config, dropout=0.01):
         super(MultiHeadAttention, self).__init__()
 
-        self.input_dim = n_mels
-        self.d_model = d_model
-        self.num_heads = num_heads
-        self.head_dim = d_model // num_heads
-        self.w_q = nn.Linear(n_mels, self.head_dim, bias=False)
-        self.w_k = nn.Linear(n_mels, self.head_dim, bias=False)
-        self.w_v = nn.Linear(n_mels, self.head_dim, bias=False)
-        self.out_proj = nn.Linear(self.head_dim * num_heads, d_model, bias=False)
+        self.num_heads = config.num_heads
+        self.head_dim = config.n_mels // config.num_heads
+        self.out_proj = nn.Linear(config.embedding_dim, config.embedding_dim, bias=False)
         self.dropout = nn.Dropout(dropout)
+        self.sdpa =False
 
     def forward(self, x):
-        B, T, _ = x.shape
+        B, T, C = x.shape
+        head_dim = C // self.num_heads
 
-        Q = self.w_q(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-        K = self.w_k(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-        V = self.w_v(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        Q = x.view(B, T, self.num_heads, head_dim).transpose(1, 2)
+        K = x.view(B, T, self.num_heads, head_dim).transpose(1, 2)
+        V = x.view(B, T, self.num_heads, head_dim).transpose(1, 2)
 
-        q_k = Q @ K.transpose(-2, -1)
-        attn_score = torch.softmax((q_k / (self.d_model**0.5)), dim=-1)
-        out = attn_score @ V
-        out = out.transpose(1, 2).contiguous().view(B, T, self.d_model)
-        out = self.out_proj(out)
-        # return x
+        if self.sdpa:
+            y = 0
+            pass
+        else:
+            attn_score = (Q @ K.transpose(-2, -1)) * (math.sqrt(K.shape[-1]))
+            y = attn_score @ V
+
+        y = y.transpose(1, 2).contiguous().view(B, T, C)
+        out = self.out_proj(y)
+        out = self.dropout(out)
         return out
 
 
 class ScaledDotProductAttention(nn.Module):
     def __init__(self, d_model, num_heads, dropout, n_mels):
         super(ScaledDotProductAttention, self).__init__()
-        # self.num_heads = num_heads
-        # self.head_dim = d_model // num_heads
 
         self.d_model = d_model
         self.dropout = nn.Dropout(dropout)
@@ -89,10 +90,6 @@ class ScaledDotProductAttention(nn.Module):
         self.w_k = nn.Linear(d_model, d_model, bias=False)
         self.w_v = nn.Linear(d_model, d_model, bias=False)
         self.out_proj = nn.Linear(d_model, d_model, bias=False)
-        # self.w_q = nn.Parameter(torch.randn(d_model, d_model))
-        # self.w_k = nn.Parameter(torch.randn(d_model, d_model))
-        # self.w_v = nn.Parameter(torch.randn(d_model, d_model))
-        # self.out_proj = nn.Parameter(torch.randn(d_model, d_model))
 
     def forward(self, x):
 
@@ -105,40 +102,6 @@ class ScaledDotProductAttention(nn.Module):
         out = attn_score @ V
         out = self.out_proj(out)
         return out
-
-
-# class EfficientAttention(nn.Module):
-#     def __init__(self, d_model, num_heads):
-#         super(EfficientAttention, self).__init__()
-
-
-#         self.rope = RotaryPositionalEmbedding(d_model, block_size=2048)
-
-#         self.num_heads = num_heads
-#         self.head_dim = d_model // num_heads
-
-#         self.q = nn.Parameter(torch.randn(d_model, d_model))
-#         # self.k = nn.Parameter(torch.randn(d_model, d_model))
-#         # self.v = nn.Parameter(torch.randn(d_model, d_model))
-#         # self.out_proj = nn.Parameter(torch.randn(d_model, d_model))
-
-#         # self.q = nn.Linear(d_model, d_model)
-#         # self.k = nn.Linear(d_model, d_model)
-#         # self.v = nn.Linear(d_model, d_model)
-#         # self.out_proj = nn.Linear(d_model, d_model)
-
-#         # self.d_model = d_model
-#         # self.num_heads =num_heads
-#         # self.head_dim = d_model //num_heads
-
-#         # self.q_proj = nn.Linear(d_model, d_model)
-#         # self.k_proj = nn.Linear(d_model, d_model)
-#         # self.v_proj = nn.Linear(d_model, d_model)
-#         # self.out_proj = nn.Linear(d_model, d_model)
-
-#     def forward(self, x):
-#         pass
-
 
 class FeedForward(nn.Module):
     def __init__(self, d_model, hidden_dim):
@@ -154,67 +117,66 @@ class FeedForward(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, d_model, num_heads, dropout, n_mels):
+    def __init__(self, config):
         super(EncoderLayer, self).__init__()
-        # self.x_proj = nn.Linear(n_mels, d_model, bias=False)
-        self.attention = MultiHeadAttention(n_mels, d_model, num_heads, dropout)
-        # self.attention = ScaledDotProductAttention(d_model, num_heads, dropout, n_mels)
-        # self.attention = EfficientAttention(d_model, num_heads, block_size)
-        # self.pos_encoder = PositionalEncoding(d_model, block_size)
+
+        # Referenced from: OpenAI's Whisper implementation
+        # They're using Conv1d to project mel spectrogram into embedding dimension
+        self.input_proj = nn.Conv1d(config.n_mels, config.embedding_dim, kernel_size=3, padding=1)
+        self.input_proj2 = nn.Conv1d(config.embedding_dim, config.embedding_dim, kernel_size=3, padding=1)
+
+        self.config = config
+        self.relu = nn.ReLU()
+
+        self.attention = MultiHeadAttention(config)
 
     def forward(self, x):
-        # x = self.x_proj(x)
+
+        # x = x.transpose(1,2)
+        x = self.input_proj(x)
+        x = self.relu(x)
+        x = self.input_proj2(x)
+        x = self.relu(x)
+        # print("input_proj:", x.shape)
+
+        # x = x.transpose(1,2)
         x = self.attention(x)
-        # print("attention_score: ", x)
+
+        # print(x.shape)
+
         return x
-        # x = self.pos_encoder(x)
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, d_model, block_size):
+    def __init__(self, config):
         super(DecoderLayer, self).__init__()
-        self.pos_encoder = PositionalEncoding(d_model, block_size)
+        # self.pos_encoder = PositionalEncoding(config.d_model, config.block_size)
 
     def forward(self, x):
         x = self.pos_encoder(x)
         return x
 
 
+
 class QuasTransformer(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
-        # print("config input:", config)
         self.d_model = config.embedding_dim
-        # self.pos_encoder = RotaryPositionalEmbedding(self.d_model, config.block_size)
-        # self.pos_encoder = PositionalEncoding(self.d_model, config.block_size)
 
-        self.transformer_encoder = EncoderLayer(
-            self.d_model,
-            # config.block_size,
-            num_heads=config.num_heads,
-            dropout=config.dropout,
-            n_mels=config.n_mels,
+        self.audio_encoder = EncoderLayer(
+            config,
         )
-        # self.transformer_decoder = DecoderLayer(
-        #     self.d_model,
-        #     config.block_size,
-        #     num_heads=config.num_heads,
-        #     dropout=config.dropout,
-        # )
+
+
+        self.text_decoder = DecoderLayer(
+            config,
+        )
 
     def forward(self, x):
-
-        # Transpose from (batch, n_mels, time) to (batch, time, n_mels)
         x = x.transpose(1, 2)
-        x = self.transformer_encoder(x)
+        x = self.audio_encoder(x)
 
         return x
-        # x = self.src_proj(x)
-        # x = self.pos_encoder(x)
-        # x = self.transformer_encoder(x)
-        # x = self.transformer_decoder(x)
-        # output = self.output_proj(x)
-        # return output
 
 
 from train.config import model_cfg

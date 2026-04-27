@@ -164,9 +164,15 @@ for epoch in range(epochs):
                 wer = compute_wer(pred_texts, target_texts)
                 wers.append(wer)
             avg_wer = sum(wers) / len(wers) if len(wers) > 0 else np.nan
+            print("avg_wer:", avg_wer)
+            for pred, target in zip(pred_texts[-5:], target_texts[-5:]):
+                print(f"pred: {pred}")
+                print(f"target: {target}")
+                print("-"*5)
+
             model.train()
-            run.log({"wer": avg_wer}, step=step)
-        run.log({"loss": loss.item()}, step=step)
+        #     run.log({"wer": avg_wer}, step=step)
+        # run.log({"loss": loss.item()}, step=step)
         pbar.set_postfix(loss=f"{loss.item():.4f}")
         step += 1
 
@@ -177,4 +183,4 @@ for epoch in range(epochs):
     print("=============================\n")
 
 
-run.finish()
+# run.finish()
