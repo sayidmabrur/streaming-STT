@@ -73,7 +73,8 @@ class MultiHeadAttention(nn.Module):
             y = 0
             pass
         else:
-            attn_score = (Q @ K.transpose(-2, -1)) * (math.sqrt(K.shape[-1]))
+            attn_score = (Q @ K.transpose(-2, -1)) / (math.sqrt(K.shape[-1]))
+            attn_score = torch.softmax(attn_score, dim=-1)
             y = attn_score @ V
 
         y = y.transpose(1, 2).contiguous().view(B, T, C)
@@ -90,7 +91,7 @@ class ScaledDotProductAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.w_q = nn.Linear(d_model, d_model, bias=False)
         self.w_k = nn.Linear(d_model, d_model, bias=False)
-        self.w_v = nn.Linear(d_model, d_model, bias=False)
+        self.w_v = nn.Linear(d_model, d_model, bia=False)
         self.out_proj = nn.Linear(d_model, d_model, bias=False)
 
     def forward(self, x):
@@ -119,21 +120,28 @@ class FeedForward(nn.Module):
         return x
 
 
-class ResidualAttention(nn.Module):
-    def __init__(self, config):
-        super(ResidualAttention, self).__init__()
+class ResidualAttentionBlock(nn.Module):
+    def __init__(self, config, cross_attn=False):
+        super(ResidualAttentionBlock, self).__init__()
 
         self.attention = MultiHeadAttention(config)
+        self.ln_attn = nn.LayerNorm(config.embedding_dim)
 
         self.mlp = nn.Sequential(
             nn.Linear(config.embedding_dim, config.embedding_dim * 4),
             nn.GELU(),
+            nn.Dropout(config.dropout),
             nn.Linear(config.embedding_dim * 4, config.embedding_dim),
+            nn.Dropout(config.dropout),
         )
         self.ln_mlp = nn.LayerNorm(config.embedding_dim)
+        self.cross_attn = cross_attn
 
     def forward(self, x):
-        x = x + self.attention(x)
+        x = x + self.attention(self.ln_attn(x))
+        if self.cross_attn:
+            pass
+            # x = x + self.attention(x, x)
         x = x + self.mlp(self.ln_mlp(x))
         return x
 
@@ -150,7 +158,8 @@ class EncoderLayer(nn.Module):
         self.config = config
 
         # self.attention = MultiHeadAttention(config)
-        self.attention = ResidualAttention(config)
+        # self.attention = ResidualAttentionBlock(config)
+        self.attn_blocks = nn.ModuleList([ResidualAttentionBlock(config) for _ in range(config.num_layers)])
 
         self.post_ln = nn.LayerNorm(config.embedding_dim)
 
@@ -164,11 +173,8 @@ class EncoderLayer(nn.Module):
         x = self.input_proj2(x)
         x = F.gelu(x)
         x = x.permute(0, 2, 1)
-        x = self.attention(x)
-
-
-
-
+        for block in self.attn_blocks:
+            x = block(x)
         x = self.post_ln(x)
 
         # print(x.shape)
@@ -179,10 +185,14 @@ class EncoderLayer(nn.Module):
 class DecoderLayer(nn.Module):
     def __init__(self, config):
         super(DecoderLayer, self).__init__()
+
+        self.pos_embedding = RotaryPositionalEmbedding(config.embedding_dim, config.block_size)
+
+        # self.attn_blocks =
         # self.pos_encoder = PositionalEncoding(config.d_model, config.block_size)
 
     def forward(self, x):
-        x = self.pos_encoder(x)
+        x = self.pos_embedding(x)
         return x
 
 
@@ -196,14 +206,16 @@ class QuasTransformer(nn.Module):
             config,
         )
 
-
         self.text_decoder = DecoderLayer(
             config,
         )
 
+        self.vocab_proj = nn.Linear(config.embedding_dim, config.vocab_size)
+
     def forward(self, x):
         x = x.transpose(1, 2)
         x = self.audio_encoder(x)
+        x = self.vocab_proj(x)
 
         return x
 

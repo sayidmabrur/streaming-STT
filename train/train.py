@@ -43,12 +43,21 @@ tokenizer = Tokenizer(
 )
 
 
-def greedy_decode(logits, tokenizer):
+def greedy_decode(logits, tokenizer, input_lengths=None):
     # logits shape: (batch, time, vocab)
-    preds = torch.argmax(logits, dim=-1)
+    preds = torch.argmax(logits, dim=-1)  # (batch, time)
     decoded = []
+    total_frames = 0
+    blank_frames = 0
     for i in range(preds.shape[0]):
-        pred = preds[i].tolist()
+        # Trim to valid (non-padded) frames only
+        valid_len = int(input_lengths[i]) if input_lengths is not None else preds.shape[1]
+        pred = preds[i, :valid_len].tolist()
+
+        total_frames += len(pred)
+        blank_frames += pred.count(0)
+
+        # Standard CTC collapse: merge consecutive duplicates, then remove blanks
         pred_seq = []
         for j in range(len(pred)):
             if pred[j] != 0 and (j == 0 or pred[j] != pred[j - 1]):
@@ -56,7 +65,9 @@ def greedy_decode(logits, tokenizer):
 
         text = tokenizer.decode(pred_seq)
         decoded.append(text if text.strip() else "<empty>")
-    return decoded
+
+    blank_ratio = blank_frames / total_frames if total_frames > 0 else 1.0
+    return decoded, blank_ratio
 
 
 def target_decode(targets, tokenizer):
@@ -148,27 +159,33 @@ for epoch in range(epochs):
         loss = loss_fn(output_log_softmax, y, input_lengths, target_lengths)
 
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
-        if step % 1000 == 0:
+        if step % 10000 == 0:
             model.eval()
             wers = []
             pred_texts, target_texts = [], []
             test_pbar = tqdm(test_dataloader, desc="Testing")
+            blank_ratios = []
             for idx, (x, y, input_lengths, target_lengths) in enumerate(test_pbar):
                 x, y = x.to(device), y.to(device).long()
                 with torch.no_grad():
                     output = model(x)
-                    pred_texts = greedy_decode(output, tokenizer)
+                    pred_texts, blank_ratio = greedy_decode(output, tokenizer, input_lengths)
                 target_texts = target_decode(y, tokenizer)
                 wer = compute_wer(pred_texts, target_texts)
                 wers.append(wer)
+                blank_ratios.append(blank_ratio)
             avg_wer = sum(wers) / len(wers) if len(wers) > 0 else np.nan
-            print("avg_wer:", avg_wer)
-            for pred, target in zip(pred_texts[-5:], target_texts[-5:]):
-                print(f"pred: {pred}")
-                print(f"target: {target}")
-                print("-"*5)
+            avg_blank = sum(blank_ratios) / len(blank_ratios) if blank_ratios else 1.0
+            print(f"avg_wer: {avg_wer:.4f} | blank_ratio: {avg_blank:.3f}")
+            # if avg_blank > 0.99:
+            #     print("  [!] Model is collapsing to blank — still in early CTC training phase.")
+            # for pred, target in zip(pred_texts[-5:], target_texts[-5:]):
+            #     print(f"pred: {pred}")
+            #     print(f"target: {target}")
+            #     print("-"*5)
 
             model.train()
         #     run.log({"wer": avg_wer}, step=step)
