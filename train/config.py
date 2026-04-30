@@ -23,10 +23,10 @@ class Config:
     vocab_size: int = 1000
     # hidden_size: int = 300
     embedding_dim: int = 512
-    num_layers: int = 3
+    num_layers: int = 8
     batch_size: int = 16
     block_size: int = 2048
-    num_heads: int = 4
+    num_heads: int = 8
     dropout: float = 0.01
     n_mels: int = 128
 

@@ -99,8 +99,10 @@ dataloader = DataLoader(
     batch_size=model_cfg.batch_size,
     shuffle=True,
     collate_fn=collate_fn,
-    num_workers=4,
+    num_workers=2,       # 4 workers × prefetch × pinned copies was the RAM spike
     pin_memory=True,
+    prefetch_factor=2,   # only 2 batches staged per worker at a time
+    persistent_workers=True,  # avoids re-spawning workers each epoch
 )
 
 test_dataset = CommonVoiceDataset(
@@ -114,8 +116,10 @@ test_dataloader = DataLoader(
     batch_size=model_cfg.batch_size,
     shuffle=False,
     collate_fn=collate_fn,
-    num_workers=4,
+    num_workers=2,
     pin_memory=True,
+    prefetch_factor=2,
+    persistent_workers=True,
 )
 
 # Run in offline mode to avoid connection drops during training.
@@ -197,7 +201,10 @@ for epoch in range(epochs):
 
     print(f"\n=== Epoch {epoch} Summary ===")
     print(f"Loss: {loss.item():.4f} | Avg, WER: {avg_wer:.4f}")
+    print(f"target_texts: {target_texts[-5:]}")
+    print(f"pred_texts: {pred_texts[-5:]}")
     print("=============================\n")
+
 
 
 # run.finish()

@@ -1,6 +1,5 @@
 import os
 
-import librosa
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -91,26 +90,35 @@ class FeatureExtractor(nn.Module):
         return x
 
 
-def collate_fn(batch):
+# Cap sequence length to bound the O(T²) attention memory cost.
+# At 16kHz with a hop_length of 512, 1 mel frame ≈ 32ms → 1024 frames ≈ 33s max.
+MAX_FRAMES = 1024
 
+
+def collate_fn(batch):
     specs = []
     tokens = []
     input_lengths = []
     target_lengths = []
 
     for spec, token in batch:
-        spec = spec.squeeze(0)
+        # spec from FeatureExtractor is (n_mels, T) — squeeze any leftover channel dim
+        spec = spec.squeeze(0)  # (n_mels, T)
+        spec = spec.transpose(0, 1)  # (T, n_mels)
 
-        spec = spec.transpose(0, 1)
+        # Truncate overly long sequences before padding so the whole batch
+        # doesn't balloon to the length of the single longest clip
+        if spec.shape[0] > MAX_FRAMES:
+            spec = spec[:MAX_FRAMES]
 
         specs.append(spec)
         tokens.append(token)
         input_lengths.append(spec.shape[0])
         target_lengths.append(token.shape[0])
 
-    specs = pad_sequence(specs, batch_first=True, padding_value=0)
-
-    specs = specs.transpose(1, 2)
+    # Pad to the longest (now capped) sequence in this batch
+    specs = pad_sequence(specs, batch_first=True, padding_value=0)  # (B, T, n_mels)
+    specs = specs.transpose(1, 2)  # (B, n_mels, T)
 
     tokens = pad_sequence(tokens, batch_first=True, padding_value=0)
 

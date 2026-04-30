@@ -1,11 +1,10 @@
 # type: ignore
 
-import torch.nn.functional as F
-
 import math
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from train.config import Config
 
@@ -51,61 +50,46 @@ class RotaryPositionalEmbedding(nn.Module):
 
 # class AttentionBlock
 
+
 class MultiHeadAttention(nn.Module):
     def __init__(self, config, dropout=0.01):
         super(MultiHeadAttention, self).__init__()
 
         self.num_heads = config.num_heads
-        self.head_dim = config.n_mels // config.num_heads
-        self.out_proj = nn.Linear(config.embedding_dim, config.embedding_dim, bias=False)
-        self.dropout = nn.Dropout(dropout)
-        self.sdpa =False
+        self.head_dim = config.embedding_dim // config.num_heads
+        # Learned Q, K, V projections — essential for the model to learn different subspaces
+        self.w_q = nn.Linear(config.embedding_dim, config.embedding_dim, bias=False)
+        self.w_k = nn.Linear(config.embedding_dim, config.embedding_dim, bias=False)
+        self.w_v = nn.Linear(config.embedding_dim, config.embedding_dim, bias=False)
+        self.out_proj = nn.Linear(
+            config.embedding_dim, config.embedding_dim, bias=False
+        )
+        self.dropout_val = dropout
+
+        # Zero-init out_proj so each attention block starts as an identity residual.
+        # Without this, 8 stacked random projections compound variance and the
+        # loss explodes to 8-10 at init (GPT-2 / Megatron-LM trick).
+        nn.init.zeros_(self.out_proj.weight)
 
     def forward(self, x):
         B, T, C = x.shape
-        head_dim = C // self.num_heads
 
-        Q = x.view(B, T, self.num_heads, head_dim).transpose(1, 2)
-        K = x.view(B, T, self.num_heads, head_dim).transpose(1, 2)
-        V = x.view(B, T, self.num_heads, head_dim).transpose(1, 2)
+        # Project into Q, K, V then split into heads
+        Q = self.w_q(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        K = self.w_k(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        V = self.w_v(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
 
-        if self.sdpa:
-            y = 0
-            pass
-        else:
-            attn_score = (Q @ K.transpose(-2, -1)) / (math.sqrt(K.shape[-1]))
-            attn_score = torch.softmax(attn_score, dim=-1)
-            y = attn_score @ V
+        # Flash Attention: O(T) memory instead of O(T²) — avoids the huge attn_score matrix
+        y = F.scaled_dot_product_attention(
+            Q,
+            K,
+            V,
+            dropout_p=self.dropout_val if self.training else 0.0,
+        )
 
         y = y.transpose(1, 2).contiguous().view(B, T, C)
-        out = self.out_proj(y)
-        out = self.dropout(out)
-        return out
+        return self.out_proj(y)
 
-
-class ScaledDotProductAttention(nn.Module):
-    def __init__(self, d_model, num_heads, dropout, n_mels):
-        super(ScaledDotProductAttention, self).__init__()
-
-        self.d_model = d_model
-        self.dropout = nn.Dropout(dropout)
-        self.w_q = nn.Linear(d_model, d_model, bias=False)
-        self.w_k = nn.Linear(d_model, d_model, bias=False)
-        self.w_v = nn.Linear(d_model, d_model, bia=False)
-        self.out_proj = nn.Linear(d_model, d_model, bias=False)
-
-    def forward(self, x):
-
-        B, T, C = x.shape
-        head_dim = C // self.num_heads
-        Q = self.w_q(x)
-        K = self.w_k(x)
-        V = self.w_v(x)
-        q_k = Q @ K.transpose(-2, -1)
-        attn_score = torch.softmax((q_k / math.sqrt(head_dim)), dim=-1)
-        out = attn_score @ V
-        out = self.out_proj(out)
-        return out
 
 class FeedForward(nn.Module):
     def __init__(self, d_model, hidden_dim):
@@ -137,6 +121,9 @@ class ResidualAttentionBlock(nn.Module):
         self.ln_mlp = nn.LayerNorm(config.embedding_dim)
         self.cross_attn = cross_attn
 
+        nn.init.zeros_(self.mlp[3].weight)
+        nn.init.zeros_(self.mlp[3].bias)
+
     def forward(self, x):
         x = x + self.attention(self.ln_attn(x))
         if self.cross_attn:
@@ -152,17 +139,22 @@ class EncoderLayer(nn.Module):
 
         # Referenced from: OpenAI's Whisper implementation
         # They're using Conv1d to project mel spectrogram into embedding dimension
-        self.input_proj = nn.Conv1d(config.n_mels, config.embedding_dim, kernel_size=3, padding=1)
-        self.input_proj2 = nn.Conv1d(config.embedding_dim, config.embedding_dim, kernel_size=3, padding=1)
+        self.input_proj = nn.Conv1d(
+            config.n_mels, config.embedding_dim, kernel_size=3, padding=1
+        )
+        self.input_proj2 = nn.Conv1d(
+            config.embedding_dim, config.embedding_dim, kernel_size=3, padding=1
+        )
 
         self.config = config
 
         # self.attention = MultiHeadAttention(config)
         # self.attention = ResidualAttentionBlock(config)
-        self.attn_blocks = nn.ModuleList([ResidualAttentionBlock(config) for _ in range(config.num_layers)])
+        self.attn_blocks = nn.ModuleList(
+            [ResidualAttentionBlock(config) for _ in range(config.num_layers)]
+        )
 
         self.post_ln = nn.LayerNorm(config.embedding_dim)
-
 
     def forward(self, x):
 
@@ -186,7 +178,9 @@ class DecoderLayer(nn.Module):
     def __init__(self, config):
         super(DecoderLayer, self).__init__()
 
-        self.pos_embedding = RotaryPositionalEmbedding(config.embedding_dim, config.block_size)
+        self.pos_embedding = RotaryPositionalEmbedding(
+            config.embedding_dim, config.block_size
+        )
 
         # self.attn_blocks =
         # self.pos_encoder = PositionalEncoding(config.d_model, config.block_size)
@@ -194,7 +188,6 @@ class DecoderLayer(nn.Module):
     def forward(self, x):
         x = self.pos_embedding(x)
         return x
-
 
 
 class QuasTransformer(nn.Module):
@@ -226,8 +219,8 @@ BLOCK_SIZE = 4096
 EMBEDDING_DIM = model_cfg.embedding_dim
 N_MELS = 128
 
-train_sample = torch.randn(8, N_MELS, BLOCK_SIZE)
-model = QuasTransformer(model_cfg)
-x = model(train_sample)
+# train_sample = torch.randn(8, N_MELS, BLOCK_SIZE)
+# model = QuasTransformer(model_cfg)
+# x = model(train_sample)
 # print(x.shape)
 # print(model)
