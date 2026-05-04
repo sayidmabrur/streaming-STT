@@ -71,16 +71,18 @@ class MultiHeadAttention(nn.Module):
         # loss explodes to 8-10 at init (GPT-2 / Megatron-LM trick).
         nn.init.zeros_(self.out_proj.weight)
 
-    def forward(self, x, mask=None):
+    def forward(self, x, xa=None, mask=None):
         B, T, C = x.shape
 
         # Project into Q, K, V then split into heads
-        print("x_shape:", x.shape)
+        # print("x_shape:", x.shape)
         Q = self.w_q(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-        K = self.w_k(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-        V = self.w_v(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        K = self.w_k(x if xa is not None else x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        V = self.w_v(x if xa is not None else x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
 
         # Flash Attention: O(T) memory instead of O(T²) — avoids the huge attn_score matrix
+        # print("Q:", Q.shape, "K:", K.shape, "V:", V.shape)
+        # print("mask:", mask.shape if mask is not None else None)
         y = F.scaled_dot_product_attention(
             Q,
             K,
@@ -185,27 +187,32 @@ class DecoderLayer(nn.Module):
     def __init__(self, config):
         super(DecoderLayer, self).__init__()
 
+        self.tok_embedding = nn.Embedding(config.vocab_size, config.embedding_dim)
         self.pos_embedding = RotaryPositionalEmbedding(
             config.embedding_dim, config.block_size
         )
 
         self.blocks = nn.ModuleList(
-            [ResidualAttentionBlock(config) for _ in range(config.num_layers)]
+            [ResidualAttentionBlock(config, cross_attn=True) for _ in range(config.num_layers)]
         )
         self.ln = nn.LayerNorm(config.embedding_dim)
 
         mask = torch.empty(config.block_size, config.block_size).fill_(float("-inf")).triu_(1)
+        # print("mask_size:", mask.shape)
         self.register_buffer("mask", mask, persistent=False)
 
-    def forward(self, x):
+    def forward(self, x, xa):
+        x = self.tok_embedding(x)
         x = self.pos_embedding(x)
+
+        # print("decoder_input:", x.shape)
 
         for block in self.blocks:
             x = block(x, mask=self.mask)
         x = self.ln(x)
 
-        logits = x @ self.pos_embedding.weight.transpose(0, 1)
-        return logits
+        x = x @ torch.transpose(self.tok_embedding.weight.to(x.device), 0, 1)
+        return x
 
 
 class QuasTransformer(nn.Module):
@@ -213,34 +220,30 @@ class QuasTransformer(nn.Module):
         super().__init__()
         self.d_model = config.embedding_dim
 
-        self.audio_encoder = EncoderLayer(
+        self.encoder = EncoderLayer(
             config,
         )
 
-        self.text_decoder = DecoderLayer(
+        self.decoder = DecoderLayer(
             config,
         )
 
-        self.vocab_proj = nn.Linear(config.embedding_dim, config.vocab_size)
+        # self.logits = nn.Linear(config.embedding_dim, config.vocab_size)
 
-    def forward(self, x):
-        x = x.transpose(1, 2)
-        x = self.audio_encoder(x)
-        print("encoder_output:", x.shape)
-        # x = self.text_decoder(x)
+    def forward(self, mel, tokens):
+        x = mel.transpose(1, 2)
+        return self.decoder(tokens, self.encoder(x))
 
-        x = self.vocab_proj(x)
-        return x
+# from train.config import model_cfg
 
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# BLOCK_SIZE = 2048
+# EMBEDDING_DIM = model_cfg.embedding_dim
+# N_MELS = 128
+# tokens = torch.randint(0, model_cfg.vocab_size, (8, BLOCK_SIZE)).to(device)
 
-from train.config import model_cfg
-
-BLOCK_SIZE = 4096
-EMBEDDING_DIM = model_cfg.embedding_dim
-N_MELS = 128
-
-train_sample = torch.randn(8, N_MELS, BLOCK_SIZE)
-model = QuasTransformer(model_cfg)
-x = model(train_sample)
-print(x.shape)
-print(model)
+# train_sample = torch.randn(8, N_MELS, BLOCK_SIZE).to(device)
+# model = QuasTransformer(model_cfg).to(device)
+# x = model(train_sample, tokens)
+# print(x.shape)
+# print(model)

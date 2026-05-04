@@ -29,7 +29,8 @@ epochs = train_cfg.epochs
 
 model = QuasTransformer(model_cfg).to(device)
 optimizer = optim.Adam(model.parameters(), lr=train_cfg.learning_rate)
-loss_fn = nn.CTCLoss(blank=0, zero_infinity=True)
+# loss_fn = nn.CTCLoss(blank=0, zero_infinity=True)
+loss_fn = nn.CrossEntropyLoss()
 
 dataset = CommonVoiceDataset(
     tsv_path=train_cfg.tsv_path,
@@ -166,11 +167,14 @@ for epoch in range(epochs):
         x, y = x.to(device), y.to(device).long()
         optimizer.zero_grad()
 
-        output = model(x)
+        print("mels shape:", x.shape, "tokens shape:", y.shape)
+        output = model(x, y)
         output_log_softmax = nn.functional.log_softmax(output, dim=-1)
         output_log_softmax = output_log_softmax.transpose(0, 1)
 
         loss = loss_fn(output_log_softmax, y, input_lengths, target_lengths)
+
+        # loss = loss_fn(output_log_softmax, y, input_lengths, target_lengths)
         epoch_losses.append(loss.item())
 
         loss.backward()
