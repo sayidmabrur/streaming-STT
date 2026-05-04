@@ -22,17 +22,17 @@ def train_tokenizer(tsv_path, model_prefix="commonvoice_v25_BPE", vocab_size=100
             f.write(s + "\n")
 
     # Train SentencePiece
-    # We set pad_id=0 to act as our CTC Blank Token
-    # bos_id and eos_id are disabled (-1) since CTC doesn't use them
+    # Layout: 0=<pad>, 1=<unk>, 2=<s> (BOS), 3=</s> (EOS), 4-N=BPE tokens
+    # BOS + EOS are required for teacher-forcing in the encoder-decoder model.
     spm.SentencePieceTrainer.train(
         input=temp_txt,
         model_prefix=model_prefix,
         vocab_size=vocab_size,
         model_type="bpe",
-        pad_id=0,  # Used as CTC Blank <pad>
-        unk_id=1,  # <unk> token
-        bos_id=-1,  # No beginning of sentence token
-        eos_id=-1,  # No end of sentence token
+        pad_id=0,   # <pad>  — also used as ignore_index in CrossEntropyLoss
+        unk_id=1,   # <unk>
+        bos_id=2,   # <s>    — decoder start token
+        eos_id=3,   # </s>   — decoder stop token
     )
 
     # Clean up the temporary text file
