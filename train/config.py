@@ -14,22 +14,21 @@ class TrainingConfig:
     audio_dir_path: str = os.path.join(PROJECT_ROOT, "dataset/en/clips")
     tokenizer_prefix: str = "commonvoiceBPE"
     vocab_size: int = 1000
-    seed: int = 42
-    wandb_log: bool = False
+    seed: int = 43
+    wandb_log: bool = True
 
 
 @dataclass
 class Config:
     vocab_size: int = 1000
     # hidden_size: int = 300
-    embedding_dim: int = 512
-    num_layers: int = 8
-    batch_size: int = 16
+    embedding_dim: int = 128
+    num_layers: int = 2
+    batch_size: int = 8
     block_size: int = 2048
     num_heads: int = 8
     dropout: float = 0.01
     n_mels: int = 128
-
 
 # Instantiate both configurations to be imported by other modules
 model_cfg = Config()

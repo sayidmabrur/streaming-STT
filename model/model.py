@@ -71,10 +71,11 @@ class MultiHeadAttention(nn.Module):
         # loss explodes to 8-10 at init (GPT-2 / Megatron-LM trick).
         nn.init.zeros_(self.out_proj.weight)
 
-    def forward(self, x):
+    def forward(self, x, mask=None):
         B, T, C = x.shape
 
         # Project into Q, K, V then split into heads
+        print("x_shape:", x.shape)
         Q = self.w_q(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         K = self.w_k(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         V = self.w_v(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
@@ -85,6 +86,7 @@ class MultiHeadAttention(nn.Module):
             K,
             V,
             dropout_p=self.dropout_val if self.training else 0.0,
+            attn_mask=mask,
         )
 
         y = y.transpose(1, 2).contiguous().view(B, T, C)
@@ -119,15 +121,19 @@ class ResidualAttentionBlock(nn.Module):
             nn.Dropout(config.dropout),
         )
         self.ln_mlp = nn.LayerNorm(config.embedding_dim)
-        self.cross_attn = cross_attn
+        # self.cross_attn = cross_attn
+        self.cross_attn = MultiHeadAttention(config) if cross_attn else None
+
+        self.cross_attn_ln = nn.LayerNorm(config.embedding_dim) if cross_attn else None
 
         nn.init.zeros_(self.mlp[3].weight)
         nn.init.zeros_(self.mlp[3].bias)
 
-    def forward(self, x):
-        x = x + self.attention(self.ln_attn(x))
+    def forward(self, x, mask=None):
+        x = x + self.attention(self.ln_attn(x), mask=mask)
         if self.cross_attn:
-            pass
+            x = x + self.cross_attn(self.cross_attn_ln(x))
+            # pass
             # x = x + self.attention(x, x)
         x = x + self.mlp(self.ln_mlp(x))
         return x
@@ -174,6 +180,7 @@ class EncoderLayer(nn.Module):
         return x
 
 
+# ref: https://github.com/openai/whisper/blob/main/whisper/model.py
 class DecoderLayer(nn.Module):
     def __init__(self, config):
         super(DecoderLayer, self).__init__()
@@ -182,12 +189,23 @@ class DecoderLayer(nn.Module):
             config.embedding_dim, config.block_size
         )
 
-        # self.attn_blocks =
-        # self.pos_encoder = PositionalEncoding(config.d_model, config.block_size)
+        self.blocks = nn.ModuleList(
+            [ResidualAttentionBlock(config) for _ in range(config.num_layers)]
+        )
+        self.ln = nn.LayerNorm(config.embedding_dim)
+
+        mask = torch.empty(config.block_size, config.block_size).fill_(float("-inf")).triu_(1)
+        self.register_buffer("mask", mask, persistent=False)
 
     def forward(self, x):
         x = self.pos_embedding(x)
-        return x
+
+        for block in self.blocks:
+            x = block(x, mask=self.mask)
+        x = self.ln(x)
+
+        logits = x @ self.pos_embedding.weight.transpose(0, 1)
+        return logits
 
 
 class QuasTransformer(nn.Module):
@@ -208,8 +226,10 @@ class QuasTransformer(nn.Module):
     def forward(self, x):
         x = x.transpose(1, 2)
         x = self.audio_encoder(x)
-        x = self.vocab_proj(x)
+        print("encoder_output:", x.shape)
+        # x = self.text_decoder(x)
 
+        x = self.vocab_proj(x)
         return x
 
 
@@ -219,8 +239,8 @@ BLOCK_SIZE = 4096
 EMBEDDING_DIM = model_cfg.embedding_dim
 N_MELS = 128
 
-# train_sample = torch.randn(8, N_MELS, BLOCK_SIZE)
-# model = QuasTransformer(model_cfg)
-# x = model(train_sample)
-# print(x.shape)
-# print(model)
+train_sample = torch.randn(8, N_MELS, BLOCK_SIZE)
+model = QuasTransformer(model_cfg)
+x = model(train_sample)
+print(x.shape)
+print(model)

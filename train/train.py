@@ -127,7 +127,7 @@ test_dataloader = DataLoader(
 #   wandb sync wandb/latest-run
 
 if train_cfg.wandb_log:
-    wandb.setup(settings=wandb.Settings(mode="offline"))
+    wandb.setup(settings=wandb.Settings(mode="online"))
     run = wandb.init(
         # Set the wandb entity where your project will be logged (generally your team name).
         entity="sayid-10121012-universitas-komputer-indonesia",
@@ -141,16 +141,26 @@ if train_cfg.wandb_log:
             "epochs": train_cfg.epochs,
         },
     )
-else:
-    glob_log = []
-
-    def run(log: list, step: int):
-        glob_log.append({"step": step, "log": log})
+    # ── Overall charts (x-axis = epoch) ──────────────────────────────────
+    wandb.define_metric("epoch")
+    wandb.define_metric("overall/loss", step_metric="epoch")
+    wandb.define_metric("overall/wer",  step_metric="epoch")
 
 
 step = 1
 for epoch in range(epochs):
-    avg_wer = 0
+    step_in_epoch = 0
+    avg_wer = np.nan
+    epoch_losses: list[float] = []
+    epoch_wers:   list[float] = []
+    pred_texts, target_texts = [], []
+
+    # ── Per-epoch charts (x-axis = train_step within epoch) ──────────────
+    if train_cfg.wandb_log:
+        wandb.define_metric(f"epoch_{epoch}/train_step")
+        wandb.define_metric(f"epoch_{epoch}/loss", step_metric=f"epoch_{epoch}/train_step")
+        wandb.define_metric(f"epoch_{epoch}/wer",  step_metric=f"epoch_{epoch}/train_step")
+
     pbar = tqdm(dataloader, desc=f"Epoch {epoch}")
     for idx, (x, y, input_lengths, target_lengths) in enumerate(pbar):
         x, y = x.to(device), y.to(device).long()
@@ -161,50 +171,65 @@ for epoch in range(epochs):
         output_log_softmax = output_log_softmax.transpose(0, 1)
 
         loss = loss_fn(output_log_softmax, y, input_lengths, target_lengths)
+        epoch_losses.append(loss.item())
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
+        # ── Log per-step loss for this epoch's chart ──────────────────────
+        if train_cfg.wandb_log:
+            wandb.log({
+                f"epoch_{epoch}/loss":       loss.item(),
+                f"epoch_{epoch}/train_step": step_in_epoch,
+            })
+
         if step % 10000 == 0:
             model.eval()
             wers = []
-            pred_texts, target_texts = [], []
             test_pbar = tqdm(test_dataloader, desc="Testing")
-            blank_ratios = []
-            for idx, (x, y, input_lengths, target_lengths) in enumerate(test_pbar):
-                x, y = x.to(device), y.to(device).long()
+            for _, (tx, ty, t_input_lengths, _t_target_lengths) in enumerate(test_pbar):
+                tx, ty = tx.to(device), ty.to(device).long()
                 with torch.no_grad():
-                    output = model(x)
-                    pred_texts, blank_ratio = greedy_decode(output, tokenizer, input_lengths)
-                target_texts = target_decode(y, tokenizer)
+                    t_output = model(tx)
+                    pred_texts, _ = greedy_decode(t_output, tokenizer, t_input_lengths)
+                target_texts = target_decode(ty, tokenizer)
                 wer = compute_wer(pred_texts, target_texts)
                 wers.append(wer)
-                blank_ratios.append(blank_ratio)
             avg_wer = sum(wers) / len(wers) if len(wers) > 0 else np.nan
-            avg_blank = sum(blank_ratios) / len(blank_ratios) if blank_ratios else 1.0
-            print(f"avg_wer: {avg_wer:.4f} | blank_ratio: {avg_blank:.3f}")
-            # if avg_blank > 0.99:
-            #     print("  [!] Model is collapsing to blank — still in early CTC training phase.")
-            # for pred, target in zip(pred_texts[-5:], target_texts[-5:]):
-            #     print(f"pred: {pred}")
-            #     print(f"target: {target}")
-            #     print("-"*5)
+            epoch_wers.append(avg_wer)
+            print(f"avg_wer: {avg_wer:.4f}")
+
+            # ── Log per-step WER for this epoch's chart ───────────────────
+            if train_cfg.wandb_log:
+                wandb.log({
+                    f"epoch_{epoch}/wer":        avg_wer,
+                    f"epoch_{epoch}/train_step": step_in_epoch,
+                })
 
             model.train()
-        #     run.log({"wer": avg_wer}, step=step)
-        # run.log({"loss": loss.item()}, step=step)
+
         pbar.set_postfix(loss=f"{loss.item():.4f}")
         step += 1
+        step_in_epoch += 1
+
+    # ── End-of-epoch: log to overall charts ──────────────────────────────
+    epoch_avg_loss = float(np.mean(epoch_losses)) if epoch_losses else np.nan
+    epoch_avg_wer  = float(np.mean(epoch_wers))   if epoch_wers   else np.nan
+    if train_cfg.wandb_log:
+        wandb.log({
+            "overall/loss": epoch_avg_loss,
+            "overall/wer":  epoch_avg_wer,
+            "epoch":        epoch,
+        })
 
     save_file(model.state_dict(), f"checkpoint_{epoch}.safetensors")
 
     print(f"\n=== Epoch {epoch} Summary ===")
-    print(f"Loss: {loss.item():.4f} | Avg, WER: {avg_wer:.4f}")
+    print(f"Loss: {loss.item():.4f} | Avg WER: {avg_wer:.4f}")
     print(f"target_texts: {target_texts[-5:]}")
     print(f"pred_texts: {pred_texts[-5:]}")
     print("=============================\n")
 
-
-
-# run.finish()
+if train_cfg.wandb_log:
+    run.finish()
